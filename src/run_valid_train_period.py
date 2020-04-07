@@ -111,11 +111,12 @@ def get_topn_items(recommendation_mat, item_dict, index_user, top_n, threshold):
     return result_items
 
 
-def recommend(train_mat, test, item_dict, user_dict, top_n, threshold, mode="cf_itembased"):
+def recommend(train_mat, train_latest_mat, test, item_dict, user_dict, top_n, threshold, mode="cf_itembased"):
     """calcurate recommendation items and return submission formatted data frame
     
     Arguments:
         train_mat {2d array} -- train data (purchase flag) matrix (dimension: (user, item))
+        train_latest_mat {2d array} -- train data (purchase flag) matrix filtered by a month bfore test (dimension: (user, item))
         test {pandas.DataFrame} -- test data
         item_dict {dict} -- key: index(int), value: item name(string)
         user_dict {dict} -- key: user id (int), value: user index for train data (int)
@@ -133,14 +134,14 @@ def recommend(train_mat, test, item_dict, user_dict, top_n, threshold, mode="cf_
     elif mode == "cf_itembased":
         recommendation_mat = cf_itembased(train_mat)
     
-    recommendation_mat = mask_alreadybuy(recommendation_mat, train_mat)
+    recommendation_mat = mask_alreadybuy(recommendation_mat, train_latest_mat)
 
     pred = []
     for user in test["ncodpers"]:
         i = user_dict[user]
         p = get_topn_items(recommendation_mat, item_dict, i, top_n, threshold)  # [::-1] means reverse of array
         pred.append(" ".join(p))  # join with white space for submission format
-            
+        
     test["added_products"] = pred
     return test
 
@@ -158,11 +159,13 @@ if __name__ == "__main__":
                 "ind_nomina_ult1", "ind_nom_pens_ult1", "ind_recibo_ult1"
                 ]
 
-    # read file & filter by date (use only 2016/5 data) for train data
+    # read file
     print("read file")
     train = pd.read_csv("../input/train_ver2.csv", usecols=usecols1)
-    train = train.query("fecha_dato == '2016-05-28'").drop("fecha_dato", axis=1)
-    
+    train_latest = train.query("fecha_dato == '2016-05-28'").drop("fecha_dato", axis=1)
+    train = train.drop("fecha_dato", axis=1).groupby("ncodpers", as_index=False).max()
+    train = train.replace(np.nan, 0)
+
     test = pd.read_csv("../input/test_ver2.csv")
     test = test.loc[:, ["ncodpers"]]
 
@@ -179,10 +182,14 @@ if __name__ == "__main__":
         item_dict[i] = item
 
     # convert train data frame to matrix
+    train_latest = train.loc[:, ["ncodpers"]].merge(train_latest, on="ncodpers", how="left").replace(np.nan, 0)
+    train_latest = train_latest.drop("ncodpers", axis=1)
+    train_latest_mat = np.array(train_latest)
+    
     train = train.drop('ncodpers', axis=1)
     train_mat = np.array(train)
 
     # calcuration recommendation items and write submit csv
     print("start calculation")
-    recommend(train_mat, test, item_dict, user_dict, 7, 0, mode)  # 0.001, mode)
-    test.to_csv("../submission/submission_" + mode + ".csv", index=False)
+    recommend(train_mat, train_latest_mat, test, item_dict, user_dict, 7, 0, mode)
+    test.to_csv("../submission/submission_test" + mode + ".csv", index=False)
